@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Offline Survey System</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1c2430;--mu:#6b7686;--ac:#2563eb;--bd:#dde2ea;--ok:#15803d;--dn:#b91c1c}
+@media(prefers-color-scheme:dark){:root{--bg:#10151c;--card:#19212b;--tx:#e8edf3;--mu:#98a3b3;--ac:#5b8def;--bd:#2c3745;--ok:#4ade80;--dn:#f87171}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.5 system-ui,Segoe UI,Roboto,sans-serif}
+#app{max-width:760px;margin:0 auto;padding:16px}
+h1{font-size:1.4rem;margin:0}h2{font-size:1.2rem;margin:.2em 0 .6em}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:14px;margin:12px 0}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+.row.l{justify-content:flex-start}.mu{color:var(--mu);font-size:.9rem}
+button{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:9px 14px;font:inherit;cursor:pointer}
+button.g{background:transparent;color:var(--tx);border:1px solid var(--bd)}button.d{background:transparent;color:var(--dn);border:1px solid var(--bd)}
+input:not([type=checkbox]):not([type=radio]),textarea,select{width:100%;padding:9px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font:inherit}
+label{display:block;margin:8px 0;font-weight:600}label.o{font-weight:400;display:flex;gap:8px;align-items:center;margin:4px 0}
+.badge{font-size:.8rem;padding:2px 10px;border-radius:99px;border:1px solid var(--bd)}.on{color:var(--ok)}.off{color:var(--dn)}
+.bar{height:10px;background:var(--ac);border-radius:5px;min-width:2px}.sc{overflow-x:auto}
+table{border-collapse:collapse;font-size:.88rem;width:100%}td,th{border:1px solid var(--bd);padding:5px 8px;text-align:left;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis}
+.err{color:var(--dn);font-size:.9rem}
+</style></head><body><div id="app"></div>
+<script>
+const K='offsurvey.v1';
+const e=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+let db={surveys:[],responses:[],pin:''};
+try{db=Object.assign(db,JSON.parse(localStorage.getItem(K)||'{}'))}catch(x){}
+const save=()=>{try{localStorage.setItem(K,JSON.stringify(db))}catch(x){alert('Could not save on this device. Export a backup now.')}};
+const T={text:'Short answer',para:'Paragraph',mc:'Multiple choice',cb:'Checkboxes',rate:'Rating (1 to 5)'};
+const hasOpts=t=>t=='mc'||t=='cb';
+let v={n:'home'},d=null,errs=[],done=false;
+const cnt=id=>db.responses.filter(r=>r.sid==id).length;
+const S=id=>db.surveys.find(s=>s.id==id);
+function dl(name,txt,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type}));a.download=name;a.click()}
+
+function home(){return `<div class=row><h1>Offline Survey System</h1><span id=net class=badge></span></div>
+<p class=mu>Works with no internet. Everything is saved on this device.</p>
+<button data-a=new>+ New survey</button>
+${db.surveys.map(s=>`<div class=card><b>${e(s.title)}</b><div class=mu>${s.qs.length} questions · ${cnt(s.id)} responses</div>
+<div class="row l" style="margin-top:8px"><button data-a=collect data-id=${s.id}>Collect answers</button><button class=g data-a=results data-id=${s.id}>Results</button><button class=g data-a=edit data-id=${s.id}>Edit</button><button class=d data-a=del data-id=${s.id}>Delete</button></div></div>`).join('')||'<p class=mu>No surveys yet. Create your first one.</p>'}
+<div class=card><b>Backup and combine devices</b><div class=mu>Export a file, then import it on another device or laptop. Surveys and responses are merged and duplicates are skipped.</div>
+<div class="row l" style="margin-top:8px"><button class=g data-a=exp>Export backup</button><button class=g data-a=imp>Import backup</button><button class=g data-a=pin>${db.pin?'Change':'Set'} PIN</button></div>
+<input type=file id=f accept=".json" hidden></div>`}
+
+function edit(){return `<h2>${d.isNew?'New':'Edit'} survey</h2>
+<label>Title<input data-f=title value="${e(d.title)}"></label>
+<label>Description (shown to respondents)<textarea data-f=desc rows=2>${e(d.desc)}</textarea></label>
+${d.qs.map((q,i)=>`<div class=card><label>Question ${i+1}<input data-f=t data-i=${i} value="${e(q.t)}"></label>
+<div class=row><select data-f=type data-i=${i} style="width:auto">${Object.entries(T).map(([k,n])=>`<option value=${k} ${q.type==k?'selected':''}>${n}</option>`).join('')}</select>
+<label class=o><input type=checkbox data-f=req data-i=${i} ${q.req?'checked':''}> Required</label></div>
+${hasOpts(q.type)?`<label>Options (one per line)<textarea data-f=opts data-i=${i} rows=3>${e(q.opts.join('\n'))}</textarea></label>`:''}
+<div class="row l"><button class=g data-a=up data-i=${i}>↑</button><button class=g data-a=dn data-i=${i}>↓</button><button class=d data-a=rm data-i=${i}>Remove</button></div></div>`).join('')}
+<button class=g data-a=addq>+ Add question</button>
+${errs.map(x=>`<p class=err>${x}</p>`).join('')}
+<div class="row l" style="margin-top:14px"><button data-a=saveq>Save survey</button><button class=g data-a=home>Cancel</button></div>`}
+
+function collect(){const s=S(v.id);
+if(done)return `<div class=card style="text-align:center"><h2>Thank you!</h2><p>Your response was saved.</p><button data-a=next>Next respondent</button></div><p><button class=g data-a=exit>Exit</button></p>`;
+return `<h2>${e(s.title)}</h2><p class=mu>${e(s.desc)}</p>
+${s.qs.map((q,i)=>`<div class=card><b>${i+1}. ${e(q.t)}${q.req?' <span class=err>*</span>':''}</b><div data-q=${q.id}>`+
+(q.type=='text'?`<input name=${q.id}>`:q.type=='para'?`<textarea name=${q.id} rows=3></textarea>`:
+q.type=='rate'?`<div class="row l">${[1,2,3,4,5].map(n=>`<label class=o><input type=radio name=${q.id} value=${n}>${n}</label>`).join('')}</div><div class=mu>1 = lowest, 5 = highest</div>`:
+q.opts.map(o=>`<label class=o><input type=${q.type=='mc'?'radio':'checkbox'} name=${q.id} value="${e(o)}">${e(o)}</label>`).join(''))+`</div></div>`).join('')}
+${errs.map(x=>`<p class=err>${x}</p>`).join('')}
+<div class=row><button data-a=submit>Submit</button><button class=g data-a=exit>Exit</button></div>`}
+
+function results(){const s=S(v.id),R=db.responses.filter(r=>r.sid==s.id);
+const sum=s.qs.filter(q=>q.type!='text'&&q.type!='para').map(q=>{
+const opts=q.type=='rate'?['1','2','3','4','5']:q.opts,c={};opts.forEach(o=>c[o]=0);
+let tot=0,sm=0;R.forEach(r=>{[].concat(r.a[q.id]??[]).forEach(x=>{if(x in c)c[x]++;tot++;if(q.type=='rate')sm+=+x})});
+const mx=Math.max(1,...Object.values(c));
+return `<div class=card><b>${e(q.t)}</b>${q.type=='rate'&&tot?`<div class=mu>Average: ${(sm/tot).toFixed(2)}</div>`:''}
+${opts.map(o=>`<div class=row style="flex-wrap:nowrap;margin:4px 0"><span style="width:35%;overflow:hidden">${e(o)}</span><div style="flex:1"><div class=bar style="width:${c[o]/mx*100}%"></div></div><span>${c[o]}</span></div>`).join('')}</div>`}).join('');
+return `<div class=row><h2>${e(s.title)}</h2><span class=mu>${R.length} responses</span></div>
+<div class="row l"><button data-a=csv data-id=${s.id}>Download CSV (Excel)</button><button class=g data-a=home>Back</button></div>
+${sum}<div class=card><b>All responses</b><div class=sc><table><tr><th>#</th><th>Time</th>${s.qs.map(q=>`<th>${e(q.t)}</th>`).join('')}<th></th></tr>
+${R.map((r,i)=>`<tr><td>${i+1}</td><td>${new Date(r.ts).toLocaleString()}</td>${s.qs.map(q=>`<td>${e([].concat(r.a[q.id]??'').join('; '))}</td>`).join('')}<td><button class=d data-a=rr data-id=${r.id}>×</button></td></tr>`).join('')}</table></div></div>`}
+
+function render(){const a=document.getElementById('app');
+a.innerHTML=v.n=='home'?home():v.n=='edit'?edit():v.n=='collect'?collect():results();net();window.scrollTo(0,0)}
+function net(){const n=document.getElementById('net');if(n){n.textContent=navigator.onLine?'Online':'Offline';n.className='badge '+(navigator.onLine?'on':'off')}}
+const go=(n,x={})=>{v=Object.assign({n},x);errs=[];done=false;render()};
+
+const A={
+home:()=>go('home'),
+new:()=>{d={isNew:1,id:uid(),title:'',desc:'',qs:[{id:uid(),t:'',type:'text',req:false,opts:[]}]};go('edit')},
+edit:o=>{d=JSON.parse(JSON.stringify(S(o.id)));go('edit')},
+addq:()=>{d.qs.push({id:uid(),t:'',type:'text',req:false,opts:[]});render()},
+rm:o=>{d.qs.splice(o.i,1);render()},
+up:o=>{const i=+o.i;if(i>0){[d.qs[i-1],d.qs[i]]=[d.qs[i],d.qs[i-1]];render()}},
+dn:o=>{const i=+o.i;if(i<d.qs.length-1){[d.qs[i+1],d.qs[i]]=[d.qs[i],d.qs[i+1]];render()}},
+saveq:()=>{errs=[];if(!d.title.trim())errs.push('Please enter a survey title.');
+if(!d.qs.length)errs.push('Add at least one question.');
+d.qs.forEach((q,i)=>{if(!q.t.trim())errs.push(`Question ${i+1} is empty.`);if(hasOpts(q.type)&&q.opts.length<2)errs.push(`Question ${i+1} needs at least 2 options.`)});
+if(errs.length)return render();
+const{isNew,...s}=d;const i=db.surveys.findIndex(x=>x.id==s.id);i<0?db.surveys.push(s):db.surveys[i]=s;save();go('home')},
+del:o=>{if(confirm('Delete this survey and all its responses?')){db.surveys=db.surveys.filter(s=>s.id!=o.id);db.responses=db.responses.filter(r=>r.sid!=o.id);save();render()}},
+collect:o=>go('collect',{id:o.id}),
+next:()=>go('collect',{id:v.id}),
+exit:()=>{if(db.pin&&prompt('Enter PIN to exit')!==db.pin)return alert('Wrong PIN.');go('home')},
+submit:()=>{const s=S(v.id),a={};errs=[];
+s.qs.forEach((q,i)=>{const w=document.querySelector(`[data-q="${q.id}"]`);let val;
+if(q.type=='text'||q.type=='para')val=w.querySelector('input,textarea').value.trim();
+else if(q.type=='cb')val=[...w.querySelectorAll('input:checked')].map(x=>x.value);
+else{const c=w.querySelector('input:checked');val=c?c.value:''}
+if(q.req&&(Array.isArray(val)?!val.length:!val))errs.push(`Question ${i+1} is required.`);a[q.id]=val});
+if(errs.length){const keep=a;render();s.qs.forEach(q=>{const w=document.querySelector(`[data-q="${q.id}"]`),x=keep[q.id];
+if(q.type=='text'||q.type=='para')w.querySelector('input,textarea').value=x;else w.querySelectorAll('input').forEach(i=>{if([].concat(x).includes(i.value))i.checked=true})});return}
+db.responses.push({id:uid(),sid:s.id,ts:Date.now(),a});save();done=true;render()},
+results:o=>go('results',{id:o.id}),
+rr:o=>{if(confirm('Delete this response?')){db.responses=db.responses.filter(r=>r.id!=o.id);save();render()}},
+csv:o=>{const s=S(o.id),q=x=>'"'+String(x).replace(/"/g,'""')+'"';
+const rows=[['#','Submitted',...s.qs.map(z=>z.t)]].concat(db.responses.filter(r=>r.sid==s.id).map((r,i)=>[i+1,new Date(r.ts).toLocaleString(),...s.qs.map(z=>[].concat(r.a[z.id]??'').join('; '))]));
+dl(s.title.replace(/\W+/g,'_')+'.csv','\ufeff'+rows.map(r=>r.map(q).join(',')).join('\r\n'),'text/csv')},
+exp:()=>dl('survey-backup-'+new Date().toISOString().slice(0,10)+'.json',JSON.stringify({v:1,surveys:db.surveys,responses:db.responses}),'application/json'),
+imp:()=>document.getElementById('f').click(),
+pin:()=>{const p=prompt('Set a PIN used to exit respondent mode (leave blank for none):');if(p!==null){db.pin=p.trim();save();render()}}
+};
+document.addEventListener('click',ev=>{const b=ev.target.closest('[data-a]');if(b&&A[b.dataset.a])A[b.dataset.a](b.dataset)});
+document.addEventListener('input',ev=>{const t=ev.target,f=t.dataset.f;if(!f||!d)return;
+if(t.dataset.i===undefined){d[f]=t.value;return}
+const q=d.qs[+t.dataset.i];
+if(f=='req')q.req=t.checked;else if(f=='opts')q.opts=t.value.split('\n').map(x=>x.trim()).filter(Boolean);else q[f]=t.value;
+if(f=='type')render()});
+document.addEventListener('change',ev=>{const t=ev.target;if(t.id!='f'||!t.files[0])return;
+const r=new FileReader();r.onload=()=>{try{const j=JSON.parse(r.result);let ns=0,nr=0;
+(j.surveys||[]).forEach(s=>{if(!S(s.id)){db.surveys.push(s);ns++}});
+const ids=new Set(db.responses.map(x=>x.id));(j.responses||[]).forEach(x=>{if(!ids.has(x.id)&&S(x.sid)){db.responses.push(x);nr++}});
+save();alert(`Imported ${ns} new surveys and ${nr} new responses.`);render()}catch(x){alert('That file is not a valid backup.')}};r.readAsText(t.files[0])});
+addEventListener('online',net);addEventListener('offline',net);
+if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('sw.js').catch(()=>{});
+render();
+</script></body></html>
